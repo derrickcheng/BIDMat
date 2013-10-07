@@ -7,6 +7,10 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+
+import mpi.MPI;
+import mpi.MPIException;
+
 public class AllReduce {
 	
 	public class Machine {
@@ -29,10 +33,20 @@ public class AllReduce {
 		public Machine(int N0, int [] allks0, int imachine0, int M0, int bufsize, boolean doSim0, int trace0) {
 			N = N0;
 			M = M0;
-			imachine = imachine0;
+			
+			doSim = doSim0;
+			
+			if(doSim){
+				imachine = imachine0;
+			}else{
+				try{
+					MPI.Init(new String[] {""}); imachine = MPI.COMM_WORLD.Rank();					
+				}catch(MPIException e){}
+			}
+
 			allks = allks0;
 			D = allks.length;
-			doSim = doSim0;
+
 			trace = trace0;
 			layers = new Layer[D];
 			int left = 0;
@@ -65,6 +79,16 @@ public class AllReduce {
 					}
 				}
 			}
+		}
+		
+		public int geti(){
+			return imachine;
+		}
+		
+		public void stop(){
+			try{
+				MPI.Finalize();
+			}catch(MPIException e){}
 		}
 		
 		public void config(IVec downi, IVec upi) {
@@ -358,6 +382,11 @@ public class AllReduce {
 					}
 					return true;
 				} else {
+					try{
+						MPI.COMM_WORLD.Sendrecv(sbuf, 0, sendn, MPI.INT, outi, tag, rbuf, 0, recn, MPI.INT, ini, tag);
+					}catch(MPIException e){
+						System.out.println("Sendrecv exception");
+					}
 					/*				MPI.COMM_WORLD.Sendrecv(sbuf, 0, sendn, MPI.INT, outi, tag, rbuf, 0, recn, MPI.INT, ini, tag);
 			  Request sreq = MPI.COMM_WORLD.ISend(sbuf, 0, sendn, MPI.INT, outi, tag)
 				Request rreq = MPI.COMM_WORLD.IRecv(rbuf, 0, recn, MPI.INT, ini, tag)
@@ -407,3 +436,4 @@ public class AllReduce {
 
 
 }
+
