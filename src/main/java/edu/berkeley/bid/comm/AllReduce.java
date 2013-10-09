@@ -7,9 +7,8 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-
-import mpi.MPI;
-import mpi.MPIException;
+import java.nio.*;
+import mpi.*;
 
 public class AllReduce {
 	
@@ -40,7 +39,9 @@ public class AllReduce {
 				imachine = imachine0;
 			}else{
 				try{
-					MPI.Init(new String[] {""}); imachine = MPI.COMM_WORLD.Rank();					
+					//int provided = MPI.InitThread(new String[] {""}, 3); imachine = MPI.COMM_WORLD.getRank();		
+					//System.out.println(String.format("imachine: %d, provided: %d", imachine, provided));
+					MPI.Init(new String[] {""}); imachine = MPI.COMM_WORLD.Rank();		
 				}catch(MPIException e){}
 			}
 
@@ -63,7 +64,8 @@ public class AllReduce {
 				cumk *= k;
 				maxk = Math.max(maxk, k);
 			}
-			executor = Executors.newFixedThreadPool(2*maxk);
+			//executor = Executors.newFixedThreadPool(maxk);
+			executor = Executors.newFixedThreadPool(1);
 			sendbuf = new int[maxk][];
 			recbuf = new int[maxk][];
 			for (int i = 0; i < maxk; i++) {
@@ -148,13 +150,13 @@ public class AllReduce {
 				dPartInds = new int[k+1];
 				uPartInds = new int[k+1];
 				int ckk = cumk * k;
-				int ioff = imachine % cumk;
-				int ibase = (imachine/ckk)*ckk;
-				posInMyGroup = (imachine - ibase) / cumk;
+				posInMyGroup = (imachine % ckk) / cumk;
+				int ibase = imachine - posInMyGroup * cumk; 
 				for (i = 0; i < k; i++) {
 					partBoundaries.data[i] = left + (int)(((long)(right - left)) * (i+1) / k);
-					outNbr[i] = ibase + (ioff + i * cumk);
-					inNbr[i] = outNbr[i];
+					outNbr[i] = ibase + i * cumk;
+					int toMe = (k + 2*posInMyGroup - i) % k;
+					inNbr[i] = ibase + toMe * cumk; 
 				}		
 				downMaps = new IVec[k];
 				upMaps = new IVec[k];
@@ -382,33 +384,40 @@ public class AllReduce {
 					}
 					return true;
 				} else {
+					
 					try{
 						MPI.COMM_WORLD.Sendrecv(sbuf, 0, sendn, MPI.INT, outi, tag, rbuf, 0, recn, MPI.INT, ini, tag);
-					}catch(MPIException e){
-						System.out.println("Sendrecv exception");
+						//MPI.COMM_WORLD.sendRecv(sbuf, sendn, MPI.INT, outi, tag, rbuf, recn, MPI.INT, ini, tag);
+						//System.out.format("MPISENDRECV imachine: %d, outi: %d, ini: %d", imachine, outi, ini);
+					}catch(Exception e){
+						throw new RuntimeException("Exception in sendrecv "+e);
 					}
-					/*				MPI.COMM_WORLD.Sendrecv(sbuf, 0, sendn, MPI.INT, outi, tag, rbuf, 0, recn, MPI.INT, ini, tag);
-			  Request sreq = MPI.COMM_WORLD.ISend(sbuf, 0, sendn, MPI.INT, outi, tag)
-				Request rreq = MPI.COMM_WORLD.IRecv(rbuf, 0, recn, MPI.INT, ini, tag)
-				Status rdone = null;
-				Status sdone = null;
-				long timeout = 1000;   // Wait this many msecs
-				long then = System.currentTimeMillis();
-				while ((sdone == null || rdone == null) && System.currentTimeMillis() - then < timeout) {
-					if (rdone == null) rdone = rreq.Test();
-					if (sdone == null) sdone = sreq.Test();
-					sleep(1);
-				} 
-				if (rdone == null) rreq.Cancel();
-				if (sdone == null) sreq.Cancel();
-				if (rdone == null || sdone == null) {
-				  return false;
-				} else {
-				  return true;
+					/*				MPI.COMM_WORLD.Sendrecv(sbuf, 0, sendn, MPI.INT, outi, tag, rbuf, 0, recn, MPI.INT, ini, tag);*/
+					/*
+					try {		
+						Request sreq = MPI.COMM_WORLD.iSend(sbuf, sendn, MPI.INT, outi, tag);
+						Request rreq = MPI.COMM_WORLD.iRecv(rbuf, recn, MPI.INT, ini, tag);
+						Status rdone = null;
+						Status sdone = null;
+						long timeout = 1000;   // Wait this many msecs
+						long then = System.currentTimeMillis();
+						while ((sdone == null || rdone == null) && System.currentTimeMillis() - then < timeout) {
+							if (rdone == null) rdone = rreq.testStatus();
+							if (sdone == null) sdone = sreq.testStatus();
+							Thread.sleep(1);
+						}
+						if (rdone == null) rreq.cancel();
+						if (sdone == null) sreq.cancel();
+						if (rdone == null || sdone == null) {
+							return false;
+						} 
+					} catch (Exception e) {
+						throw new RuntimeException("Exception in sendrecv "+e);
+					} */
 				}
-				*/
-					return true;	
-				}
+				
+				return true;	
+				
 			}		
 		}
 	}
