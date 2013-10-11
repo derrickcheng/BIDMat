@@ -181,6 +181,7 @@ public class AllReduceX {
 			int upn;                                                 // Size of the up vector
 			int [] dPartInds;
 			int [] uPartInds;
+			
 
 			public Layer(int k0, int cumk, int left0, int right0, int imachine, int depth0) {
 				k = k0;
@@ -438,7 +439,7 @@ public class AllReduceX {
 		}
 
 		public boolean sendrecv(int igroup, int klayer, ByteBuffer [] sbuf, int sendn, int outi, ByteBuffer [] rbuf, int recn, int ini, int tag) {
-			if (imachine == outi) {
+			if ((imachine%M) == outi) {
 				Msg a = new Msg(sbuf[igroup], sendn, imachine, outi);
 				rbuf[igroup].clear();
 				rbuf[igroup].put(a.buf, 0, 4*sendn);
@@ -471,51 +472,67 @@ public class AllReduceX {
 					}
 					return true;
 				} else {
-/*					try {
-            sbuf.rewind();
-            rbuf.clear();
-						MPI.COMM_WORLD.sendRecv(sbuf, 4*sendn, MPI.BYTE, outi, tag, rbuf, 4*recn, MPI.BYTE, ini, tag); 
-						sbuf.rewind();
-						rbuf.rewind();
+					/*
+					try {
+						for(int i =0; i<replicate; i++){
+						sbuf[igroup+i*klayer].rewind();
+						rbuf[igroup+i*klayer].clear();
+						
+						if (i > 0) {
+		            		sbuf[igroup + i*klayer].put(sbuf[igroup].array(), 0, sendn);
+		            	}
+						
+						if(imachine<4){
+							MPI.COMM_WORLD.Sendrecv(sbuf[igroup+i*klayer].array(), 0, 4*sendn, MPI.BYTE, outi+i*M, tag, rbuf[igroup+i*klayer].array(), 0, 4*recn, MPI.BYTE, ini+i*M, tag); 
+						}
+						else{
+							MPI.COMM_WORLD.Sendrecv(sbuf[igroup+i*klayer].array(), 0, 4*sendn, MPI.BYTE, (M+outi+i*M)%(2*M), tag, rbuf[igroup+i*klayer].array(), 0, 4*recn, MPI.BYTE, (M+ini+i*M)%(2*M), tag); 
+						}
+						
+						sbuf[igroup+i*klayer].rewind();
+						rbuf[igroup+i*klayer].rewind();
+						}
 					} catch (MPIException e) {
 						throw new RuntimeException("Exception in sendrecv "+e);
-					} */
+					}*/
 					
 					// JFC: Use this code
+					
 					try {	 
             Request [] sreq = new Request[replicate];
             Request [] rreq = new Request[replicate];
             boolean sdone = false;
             boolean rdone = false;
+
+            
             for (int i = 0; i < replicate; i++) {
-              //System.out.format("sbuf: imachine: %d, igroup: %d", imachine, igroup);
-              //sbuf[igroup + i*M].rewind();
             	sbuf[igroup + i*klayer].rewind();
-              //System.out.format("rbuf: imachine: %d, igroup: %d", imachine, igroup);
-              //rbuf[igroup + i*M].clear();  
             	rbuf[igroup + i*klayer].clear();
             	if (i > 0) {
-            		//sbuf[igroup + i*M].put(sbuf[igroup].array(), 0, sendn);
+
             		sbuf[igroup + i*klayer].put(sbuf[igroup].array(), 0, sendn);
             	}
-            	//sreq[i] = MPI.COMM_WORLD.Isend(sbuf[igroup + i*M].array(), 0, 4*sendn, MPI.BYTE, outi + i*M, tag);
-            	//rreq[i] = MPI.COMM_WORLD.Irecv(rbuf[igroup + i*M].array(), 0, 4*recn, MPI.BYTE, ini + i*M, tag);
-            	//sreq[i] = MPI.COMM_WORLD.Isend(sbuf[igroup + i*M].array(), 0, 4*sendn, MPI.BYTE, outi, tag);
-            	//rreq[i] = MPI.COMM_WORLD.Irecv(rbuf[igroup + i*M].array(), 0, 4*recn, MPI.BYTE, ini, tag);
-            	sreq[i] = MPI.COMM_WORLD.Isend(sbuf[igroup + i*klayer].array(), 0, 4*sendn, MPI.BYTE, outi+ i*M, tag);
-            	rreq[i] = MPI.COMM_WORLD.Irecv(rbuf[igroup + i*klayer].array(), 0, 4*recn, MPI.BYTE, ini+ i*M, tag);
+
+            	if(imachine<M){
+            		sreq[i] = MPI.COMM_WORLD.Isend(sbuf[igroup + i*klayer].array(), 0, 4*sendn, MPI.BYTE, (outi+ i*M), tag);
+            		rreq[i] = MPI.COMM_WORLD.Irecv(rbuf[igroup + i*klayer].array(), 0, 4*recn, MPI.BYTE, (ini+ i*M), tag);
+            	}
+            	else{
+            		sreq[i] = MPI.COMM_WORLD.Isend(sbuf[igroup + i*klayer].array(), 0, 4*sendn, MPI.BYTE, (M+outi+ i*M)%(2*M), tag);
+                	rreq[i] = MPI.COMM_WORLD.Irecv(rbuf[igroup + i*klayer].array(), 0, 4*recn, MPI.BYTE, (M+ini+ i*M)%(2*M), tag);
+            	}
             }
             // Wait until timeout or when one send and one receive are done, then cancel others
 						long timeout = 2000;   // Wait this many msecs
 						long then = System.currentTimeMillis();
+						
 						while ((!sdone || !rdone) && System.currentTimeMillis() - then < timeout) {
 							if (!rdone) {
 								for (int i = 0; i < replicate; i++) {
 									if (rreq[i].Test() != null) {
 										if (i > 0) {
-											//int msize = rbuf[igroup + i*M].asIntBuffer().get(0);
-											//rbuf[igroup].put(rbuf[igroup + i*M].array(), 0, msize);
 											int msize = rbuf[igroup + i*klayer].asIntBuffer().get(0);
+											rbuf[igroup].clear();
 											rbuf[igroup].put(rbuf[igroup + i*klayer].array(), 0, msize);
 										}
 										rreq[i] = null;
@@ -534,15 +551,16 @@ public class AllReduceX {
 								}
 							}
 							Thread.sleep(1);
-            }  
+						}  
 						for (int i = 0; i < replicate; i++) {
-							if (sreq[i] != null && sreq[i].Test() == null) sreq[i].Cancel();
-							if (rreq[i] != null && rreq[i].Test() == null) rreq[i].Cancel();
+							if (sreq[i] != null && sreq[i].Test() == null) sreq[i]=null;
+							if (rreq[i] != null && rreq[i].Test() == null) rreq[i]=null;
 						}
-
-						if (!rdone || !sdone) {
+						
+						if ((!sdone || !rdone)) {
 							return false;
-						} 
+						}
+						
 						sbuf[igroup].rewind();
 						rbuf[igroup].rewind();
 					} catch (Exception e) {
