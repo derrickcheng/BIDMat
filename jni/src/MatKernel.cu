@@ -1,5 +1,7 @@
 #include <cuda_runtime.h>
 #include <stdio.h>
+// DERRICK
+#include <cuComplex.h>
 
 #ifdef __CUDA_ARCH__ 
 #if __CUDA_ARCH__ > 200
@@ -38,8 +40,20 @@ __device__ int iop_ge(int a, int b) {return (a >= b) ? 1 : 0;}
 __device__ int iop_le(int a, int b) {return (a <= b) ? 1 : 0;}
 __device__ int iop_ne(int a, int b) {return (a != b) ? 1 : 0;}
 
+// DERRICK: complex operators defined; should add conjugate?
+// TODO: make unary operators for conjugate and R2C matrix conversion
+// http://pixel.ecn.purdue.edu:8080/purpl/WSJ/projects/DirectionalStippling/include/cuComplex.h
+__device__ cuFloatComplex cop_add(cuFloatComplex a, cuFloatComplex b) {return cuCaddf(a,b);}
+__device__ cuFloatComplex cop_sub(cuFloatComplex a, cuFloatComplex b) {return cuCsubf(a,b);}
+__device__ cuFloatComplex cop_mul(cuFloatComplex a, cuFloatComplex b) {return cuCmulf(a,b);}
+__device__ cuFloatComplex cop_div(cuFloatComplex a, cuFloatComplex b) {return cuCdivf(a,b);}
+
+// DERRICK: Complex Unary Options: cpow 
+
 typedef float (*optype)(float,float);
 typedef int (*ioptype)(int,int);
+// DERRICK:
+typedef cuFloatComplex (*coptype)(cuFloatComplex,cuFloatComplex);
 
 __device__ const optype operators[] = {
     op_add, 
@@ -68,6 +82,13 @@ __device__ const ioptype ioperators[] = {
     iop_ge,
     iop_le,
     iop_ne};
+
+// DERRICK
+__device__ const coptype coperators[] = {
+    cop_add, 
+    cop_sub, 
+    cop_mul,
+    cop_div};
 
 __device__ float fn_abs(float a) {return abs(a);}
 __device__ float fn_exp(float a) {return expf(a);}
@@ -110,6 +131,16 @@ __device__ float fn_exppsi(float a) {return (a<1.0f) ? 0.5f*a*a : a-0.5f;}
 
 __device__ float fn_atan2(float a, float b) {return atan2f(a, b);}
 __device__ float fn_pow(float a, float b) {return powf(a, b);}
+
+// Derrick
+__device__ cuFloatComplex fn_logit(cuFloatComplex a) {return make_cuFloatComplex(1/(1+expf(-1*cuCrealf(a))), 0);}
+
+// DERRICK: complex fntype
+typedef cuFloatComplex (*cfntype)(cuFloatComplex);
+
+__device__ const cfntype cfctns[1] = {
+  fn_logit
+};
 
 typedef float (*fntype)(float);
 
@@ -196,6 +227,32 @@ __global__ void __apply_gfun(float *A, float *B, int N, int opn) {
   }
 }
 
+// DERRICK
+// complex gpu functions
+__global__ void __apply_cgfun(cuFloatComplex *A, cuFloatComplex *B, int N, int opn) {
+  cfntype fn = cfctns[opn];
+  int ip = threadIdx.x + blockDim.x * (blockIdx.x + gridDim.x * blockIdx.y);
+  for (int i = ip; i < N; i += blockDim.x * gridDim.x * gridDim.y) {
+    B[i] = fn(A[i]);
+  }
+}
+
+// DERRICK
+__global__ void __R2C(float *A, cuFloatComplex *B, int N) {
+  int ip = threadIdx.x + blockDim.x * (blockIdx.x + gridDim.x * blockIdx.y);
+  for (int i = ip; i < N; i += blockDim.x * gridDim.x * gridDim.y) {
+    B[i] = make_cuFloatComplex(A[i],0);
+  }
+}
+
+// DERRICK
+// Assumes tr
+__global__ void __zeroPad(cuFloatComplex *A, cuFloatComplex *B, int N, int nr, int nc, int left, int right, int top, int bot) {
+  int ip = threadIdx.x + blockDim.x * (blockIdx.x + gridDim.x * blockIdx.y);
+  for (int i = ip; i < N; i += blockDim.x * gridDim.x * gridDim.y) {
+    B[(left + i / nr) * (nr + top + bot) +  top + i % nr] = A[i];
+  }
+}
 
 void setsizes(int N, dim3 *gridp, int *nthreadsp) {
   int nblocks = 1;
@@ -215,6 +272,28 @@ void setsizes(int N, dim3 *gridp, int *nthreadsp) {
   *nthreadsp = nthreads;
 }
 
+// DERRICK: Complex Array to Real Array
+int R2C(float *A, cuFloatComplex *B, int N) {
+  int nthreads;
+  dim3 griddims;
+  setsizes(N, &griddims, &nthreads);
+  __R2C<<<griddims,nthreads>>>(A, B, N);
+  cudaDeviceSynchronize();
+  cudaError_t err = cudaGetLastError();
+  return err;
+}
+
+// DERRICK: Complex Array to Real Array
+int zeroPad(cuFloatComplex *A, cuFloatComplex *B, int N, int nr, int nc, int left, int right, int top, int bot) {
+  int nthreads;
+  dim3 griddims;
+  setsizes(N, &griddims, &nthreads);
+  __zeroPad<<<griddims,nthreads>>>(A, B, N, nr, nc, left, right, top, bot);
+  cudaDeviceSynchronize();
+  cudaError_t err = cudaGetLastError();
+  return err;
+}
+
 int apply_gfun(float *A, float *B, int N, int opn) {
   int nthreads;
   dim3 griddims;
@@ -224,6 +303,18 @@ int apply_gfun(float *A, float *B, int N, int opn) {
   cudaError_t err = cudaGetLastError();
   return err;
 }
+
+// DERRICK
+int apply_cgfun(cuFloatComplex *A, cuFloatComplex *B, int N, int opn) {
+  int nthreads;
+  dim3 griddims;
+  setsizes(N, &griddims, &nthreads);
+  __apply_cgfun<<<griddims,nthreads>>>(A, B, N, opn);
+  cudaDeviceSynchronize();
+  cudaError_t err = cudaGetLastError();
+  return err;
+}
+
 
 __global__ void __apply_gfun2(float *A, float *B, float *C, int N, int opn) {
   optype fn = fctns2[opn];
@@ -466,6 +557,98 @@ __global__ void __apply_left_val_int(int *A, int *B, int *C, int nrows, int ncol
   for (int i = ip; i < nrows*ncols; i += blockDim.x * gridDim.x * gridDim.y) {
     C[i] = op(val,B[i]);
   }
+}
+
+// DERRICK: Apply full for complex case
+__global__ void __apply_full_c(cuFloatComplex *A, cuFloatComplex *B, cuFloatComplex *C, int N, int opn) {
+  coptype op = coperators[opn];
+  int ip = threadIdx.x + blockDim.x * (blockIdx.x + gridDim.x * blockIdx.y);
+  for (int i = ip; i < N; i += blockDim.x * gridDim.x * gridDim.y) {
+    C[i] = op(A[i],B[i]);
+  }
+}
+
+// DERRICK
+__global__ void __apply_right_col_c(cuFloatComplex *A, cuFloatComplex *B, cuFloatComplex *C, int nrows, int ncols, int opn) {
+  coptype op = coperators[opn];
+  int ip = threadIdx.x + blockDim.x * (blockIdx.x + gridDim.x * blockIdx.y);
+  for (int i = ip; i < nrows*ncols; i += blockDim.x * gridDim.x * gridDim.y) {
+    C[i] = op(A[i],B[i % nrows]);
+  }
+}
+
+// DERRICK
+__global__ void __apply_right_row_c(cuFloatComplex *A, cuFloatComplex *B, cuFloatComplex *C, int nrows, int ncols, int opn) {
+  coptype op = coperators[opn];
+  int ip = threadIdx.x + blockDim.x * (blockIdx.x + gridDim.x * blockIdx.y);
+  for (int i = ip; i < nrows*ncols; i += blockDim.x * gridDim.x * gridDim.y) {
+    C[i] = op(A[i],B[i / nrows]);
+  }
+}
+
+// DERRICK
+__global__ void __apply_left_col_c(cuFloatComplex *A, cuFloatComplex *B, cuFloatComplex *C, int nrows, int ncols, int opn) {
+  coptype op = coperators[opn];
+  int ip = threadIdx.x + blockDim.x * (blockIdx.x + gridDim.x * blockIdx.y);
+  for (int i = ip; i < nrows*ncols; i += blockDim.x * gridDim.x * gridDim.y) {
+    C[i] = op(A[i % nrows],B[i]);
+  }
+}
+
+// DERRICK
+__global__ void __apply_left_row_c(cuFloatComplex *A, cuFloatComplex *B, cuFloatComplex *C, int nrows, int ncols, int opn) {
+  coptype op = coperators[opn];
+  int ip = threadIdx.x + blockDim.x * (blockIdx.x + gridDim.x * blockIdx.y);
+  for (int i = ip; i < nrows*ncols; i += blockDim.x * gridDim.x * gridDim.y) {
+    C[i] = op(A[i / nrows],B[i]);
+  }
+}
+
+// DERRICK
+__global__ void __apply_right_val_c(cuFloatComplex *A, cuFloatComplex *B, cuFloatComplex *C, int nrows, int ncols, int opn) {
+  coptype op = coperators[opn];
+  int ip = threadIdx.x + blockDim.x * (blockIdx.x + gridDim.x * blockIdx.y);
+  cuFloatComplex val = B[0];
+  for (int i = ip; i < nrows*ncols; i += blockDim.x * gridDim.x * gridDim.y) {
+    C[i] = op(A[i],val);
+  }
+}
+
+// DERRICK
+__global__ void __apply_left_val_c(cuFloatComplex *A, cuFloatComplex *B, cuFloatComplex *C, int nrows, int ncols, int opn) {
+  coptype op = coperators[opn];
+  int ip = threadIdx.x + blockDim.x * (blockIdx.x + gridDim.x * blockIdx.y);
+  cuFloatComplex val = A[0];
+  for (int i = ip; i < nrows*ncols; i += blockDim.x * gridDim.x * gridDim.y) {
+    C[i] = op(val,B[i]);
+  }
+}
+
+// DERRICK: CBinops
+int apply_bincop(cuFloatComplex *A, int Anrows, int Ancols, 
+     cuFloatComplex *B, int Bnrows, int Bncols, cuFloatComplex *C, int opn) {
+  int N = max(Anrows, Bnrows)*max(Ancols, Bncols);
+  int nthreads;
+  dim3 griddims;
+  setsizes(N, &griddims, &nthreads);
+  if (Anrows == Bnrows && Ancols == Bncols) {
+    __apply_full_c<<<griddims,nthreads>>>(A, B, C, N, opn);
+  } else if (Anrows == Bnrows && Bncols == 1) {
+    __apply_right_col_c<<<griddims,nthreads>>>(A, B, C, Anrows, Ancols, opn);
+  } else if (Ancols == Bncols && Bnrows == 1) {
+    __apply_right_row_c<<<griddims,nthreads>>>(A, B, C, Anrows, Ancols, opn);
+  } else if (Anrows == Bnrows && Ancols == 1) {
+    __apply_left_col_c<<<griddims,nthreads>>>(A, B, C, Bnrows, Bncols, opn);
+  } else if (Ancols == Bncols && Anrows == 1) {
+    __apply_left_row_c<<<griddims,nthreads>>>(A, B, C, Bnrows, Bncols, opn);
+  } else if (Bnrows == 1 && Bncols == 1) {
+    __apply_right_val_c<<<griddims,nthreads>>>(A, B, C, Anrows, Ancols, opn);
+  } else if (Anrows == 1 && Ancols == 1) {
+    __apply_left_val_c<<<griddims,nthreads>>>(A, B, C, Bnrows, Bncols, opn);
+  }
+  cudaDeviceSynchronize();
+  cudaError_t err = cudaGetLastError();
+  return err;
 }
 
 int apply_biniop(int *A, int Anrows, int Ancols, 

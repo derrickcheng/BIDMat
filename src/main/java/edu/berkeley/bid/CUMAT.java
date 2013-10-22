@@ -13,9 +13,18 @@ public final class CUMAT {
     public static native int applyop(Pointer A, int Anrows, int Ancols, Pointer B, int Bnrows, int Bncols, Pointer C, int opn);
 
     public static native int applyiop(Pointer A, int Anrows, int Ancols, Pointer B, int Bnrows, int Bncols, Pointer C, int opn);
-    
+    // DERRICK
+    public static native int applycop(Pointer A, int Anrows, int Ancols, Pointer B, int Bnrows, int Bncols, Pointer C, int opn);
+    // DERRICK
+    public static native int R2C(Pointer A, Pointer B, int N);
+    // DERRICK
+    public static native int zeroPad(Pointer A, Pointer B, int N, int nr, int nc, int left, int right, int top, int bot);
+
     public static native int applygfun(Pointer A, Pointer B, int N, int opn);
     
+    // DERRICK
+    public static native int applycgfun(Pointer A, Pointer B, int N, int opn);
+
     public static native int applylinks(Pointer A, Pointer L, Pointer C, int nrows, int ncols);
     
     public static native int applymeans(Pointer A, Pointer L, Pointer C, int nrows, int ncols);

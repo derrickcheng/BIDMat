@@ -1,6 +1,8 @@
 
 #include <jni.h>
 #include <cuda_runtime.h>
+// DERRICK
+#include <cuComplex.h>
 #include "Logger.hpp"
 #include "JNIUtils.hpp"
 #include "PointerUtils.hpp"
@@ -66,6 +68,41 @@ extern "C" {
     return apply_biniop(nativeA, Anrows, Ancols, nativeB, Bnrows, Bncols, nativeC, opn);
   }
 
+  // DERRICK
+  JNIEXPORT jint JNICALL Java_edu_berkeley_bid_CUMAT_applycop 
+  (JNIEnv *env, jobject obj, jobject jA, jint Anrows, jint Ancols, 
+   jobject jB, jint Bnrows, jint Bncols, jobject jC, jint opn) 
+  {
+    cuFloatComplex *nativeA = (cuFloatComplex*)getPointer(env, jA);
+    cuFloatComplex *nativeB = (cuFloatComplex*)getPointer(env, jB);
+    cuFloatComplex *nativeC = (cuFloatComplex*)getPointer(env, jC);
+
+    return apply_bincop(nativeA, Anrows, Ancols, nativeB, Bnrows, Bncols, nativeC, opn);
+  }
+
+  // DERRICK
+  JNIEXPORT jint JNICALL  Java_edu_berkeley_bid_CUMAT_R2C
+  (JNIEnv *env, jobject obj, jobject jA, jobject jB, jint N) 
+  {
+    float *nativeA = (float*)getPointer(env, jA);
+    cuFloatComplex *nativeB = (cuFloatComplex*)getPointer(env, jB);
+
+    return R2C(nativeA, nativeB, N);
+  }
+
+  // DERRICK
+  JNIEXPORT jint JNICALL  Java_edu_berkeley_bid_CUMAT_zeroPad
+  (JNIEnv *env, jobject obj, jobject jA, jobject jB, jint N, jint nr, jint nc, jint left, jint right, jint top, jint bot) 
+  {
+    cuFloatComplex *nativeA = (cuFloatComplex*)getPointer(env, jA);
+    cuFloatComplex *nativeB = (cuFloatComplex*)getPointer(env, jB);
+
+    return zeroPad(nativeA, nativeB, N, nr, nc, left, right, top, bot);
+  }
+    
+
+
+
   JNIEXPORT jint JNICALL Java_edu_berkeley_bid_CUMAT_applygfun
   (JNIEnv *env, jobject obj, jobject jA, jobject jB, jint N, jint opn) 
   {
@@ -73,6 +110,15 @@ extern "C" {
     float *nativeB = (float*)getPointer(env, jB);
 
     return apply_gfun(nativeA, nativeB, N, opn);
+  }
+
+  JNIEXPORT jint JNICALL Java_edu_berkeley_bid_CUMAT_applycgfun
+  (JNIEnv *env, jobject obj, jobject jA, jobject jB, jint N, jint opn) 
+  {
+    cuFloatComplex *nativeA = (cuFloatComplex*)getPointer(env, jA);
+    cuFloatComplex *nativeB = (cuFloatComplex*)getPointer(env, jB);
+
+    return apply_cgfun(nativeA, nativeB, N, opn);
   }
 
   JNIEXPORT jint JNICALL Java_edu_berkeley_bid_CUMAT_applygfun2

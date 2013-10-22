@@ -1236,12 +1236,14 @@ object CMat {
     out
   }
 
+  // DERRICK: modified and added gg
   def apply(x:Mat):CMat = {
     x match {
       case dd:DMat => real(FMat(dd))
       case cc:CMat => {val out = CMat(x.nrows, x.ncols); System.arraycopy(cc.data, 0, out.data, 0, 2*cc.length); out}
       case ii:IMat => real(FMat(ii))
       case ff:FMat => real(ff)
+      case gg:GMat => GMat.toCMat(gg)
 //      case xx:DenseMat[Float] => new CMat(xx.nrows, xx.ncols, xx.data)
       case _ => throw new RuntimeException("Unsupported source type")
     }

@@ -3,11 +3,23 @@ int apply_binop(float *nativeA, int Anrows, int Ancols, float *nativeB, int Bnro
 
 int apply_biniop(int *nativeA, int Anrows, int Ancols, int *nativeB, int Bnrows, int Bncols, int *nativeC, int opn);
 
+// DERRICK
+int apply_bincop(cuFloatComplex *nativeA, int Anrows, int Ancols, cuFloatComplex *nativeB, int Bnrows, int Bncols, cuFloatComplex *nativeC, int opn);
+
+// DERRICK
+int R2C(float *A, cuFloatComplex *B, int N); 
+
+// DERRICK
+int zeroPad(cuFloatComplex *A, cuFloatComplex *B, int N, int nr, int nc, int left, int right, int top, int bot);
+
 int set_val(float *A, float val, int length);
 
 int set_ival(float *A, int val, int length);
 
 int apply_gfun(float *nativeA, float *nativeB, int N, int opn);
+
+// DERRICK
+int apply_cgfun(cuFloatComplex *nativeA, cuFloatComplex *nativeB, int N, int opn);
 
 int apply_gfun2(float *nativeA, float *nativeB, float *nativeC, int N, int opn);
 

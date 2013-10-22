@@ -10,6 +10,11 @@ import jcuda.jcusparse._
 import scala.actors.Actor._
 import edu.berkeley.bid.CUMAT
 import GSMat._
+// DERRICK
+import jcuda.jcufft.JCufft._
+import jcuda.jcufft.JCufft
+import jcuda.jcufft.cufftHandle
+import jcuda.jcufft.cufftType
 
 class GMat(nr:Int, nc:Int, var data:Pointer, val realsize:Int) extends Mat(nr, nc) {
   import GMat.BinOp._
@@ -187,7 +192,185 @@ class GMat(nr:Int, nc:Int, var data:Pointer, val realsize:Int) extends Mat(nr, n
       out
     }	else throw new RuntimeException("dimensions mismatch")
   }
+
+  // DERRICK
+  def gCop(a:GMat, oldmat:Mat, op:Int):GMat = {
+    if ((nrows == a.nrows && ncols == a.ncols) ||
+        (nrows == a.nrows && (a.ncols == 1 || ncols == 1)) ||
+        (ncols == a.ncols && (a.nrows == 1 || nrows == 1)) ||
+        (a.ncols == 1 && a.nrows == 1) ||
+        (ncols == 1 && nrows == 1)) {
+      val out = GMat.newOrCheckGMat(math.max(nrows, a.nrows), math.max(ncols, a.ncols), oldmat, GUID, a.GUID, op)
+      Mat.nflops += scala.math.max(length, a.length)
+      val err = CUMAT.applycop(data, nrows /2, ncols, a.data, a.nrows /2, a.ncols, out.data, op)
+      if (err != 0) {throw new RuntimeException("GMult: CUDA kernel error in CUMAT.applycop")}
+      out
+    } else throw new RuntimeException("dimensions mismatch")
+  }
   
+  /**
+  def fft () : GMat = {
+    var plan : cufftHandle = new cufftHandle()
+    var t = cufftType.CUFFT_R2C
+    var input = data
+    //var output = Pointer.to(new Array[Float](nr*nc)) 
+    var output : Pointer = new Pointer()
+    JCuda.cudaMalloc(output, Sizeof.FLOAT * nr*nc)
+    JCufft.cufftPlan2d(plan, nr, nc, t)
+    JCufft.cufftExecR2C(plan, input, output)
+    JCufft.cufftDestroy(plan)
+    return new GMat(nr, nc, output, realsize)
+  }
+  def fft (t: Int = cufftType.CUFFT_R2C) : GMat = {
+    var t0 = System.nanoTime()
+    var plan : cufftHandle = new cufftHandle()
+    var input = data
+    //var output = Pointer.to(new Array[Float](nr*nc)) 
+    var output : Pointer = new Pointer()
+    JCuda.cudaMalloc(output, Sizeof.FLOAT * nr*nc)
+    JCufft.cufftPlan2d(plan, nr, nc, t)
+    if (t == cufftType.CUFFT_C2R) {
+      JCufft.cufftExecC2R(plan, input, output)
+    } else {
+      JCufft.cufftExecR2C(plan, input, output)
+    }
+    JCufft.cufftDestroy(plan)
+    var t1 = System.nanoTime()
+    println(((t1 - t0)/Math.pow(10,9)).toFloat + " seconds")
+    return new GMat(nr, nc, output, realsize)
+  }*/
+
+  // DERRICK
+  def fft (is_inverse : Boolean = false) : GMat = {
+    var output : GMat = null;
+    if (is_inverse) {
+      output = GMat.newOrCheckGMat(nrows /2, ncols, null, GUID, "fft".##)
+    } else {
+      output = GMat.newOrCheckGMat(2 * nrows, ncols, null, GUID, "fft".##)
+    }
+    output.clear
+    this.fft(output, is_inverse)
+    return output
+  }
+  
+  // DERRICK test
+  // def testC2R() {
+  //   var p : Pointer = null;
+  //   JCuda.cudaMalloc(p, Sizeof.FLOAT * nr*nc * 2);
+  //   val err = CUMAT.R2C(data, nr, nc, data, nr, nc);
+  // }
+
+  // DERRICK
+  def fft(output : GMat, is_inverse : Boolean) = {
+    var t0 = System.nanoTime()
+    var plan : cufftHandle = new cufftHandle()
+    if (is_inverse) {
+      //JCuda.cudaMalloc(output.data, Sizeof.FLOAT * nr*nc /2)
+      JCufft.cufftPlan2d(plan, nr, nc, cufftType.CUFFT_C2R)
+      JCufft.cufftExecC2R(plan, data, output.data)
+    } else {
+      //JCuda.cudaMalloc(output.data, Sizeof.FLOAT * nr*nc)
+      JCufft.cufftPlan2d(plan, nr, nc, cufftType.CUFFT_R2C)
+      JCufft.cufftExecR2C(plan, data, output.data)
+    }
+    JCufft.cufftDestroy(plan)
+    var t1 = System.nanoTime()
+    println(((t1 - t0)/scala.math.pow(10,9)).toFloat + " seconds")
+  }
+
+  // DERRICK
+  /**
+   * Should do the R2C and C2R stuff here, according to the inverse input
+   * Right now the returned GMat will always be in complex form
+   * Assumes the input matrix is already in Complex Form
+   */ 
+  def fft2(is_inverse : Boolean = false) : GMat = {
+    var output : GMat = GMat.newOrCheckGMat(nrows, ncols, null, GUID, "fft2".##)
+    output.clear
+    this.__fft2(output, is_inverse)
+    return output
+  }
+
+  def R2C() : GMat = {
+    var output = GMat.newOrCheckGMat(2*nrows, ncols, null, GUID, "R2C".##)
+    CUMAT.R2C(data, output.data, nrows*ncols)
+    output
+  }
+
+  // DERRICK: print data
+  // cudaMemcpy(Pointer.to(out.data), a.data, Sizeof.FLOAT*a.nrows*a.ncols, cudaMemcpyKind.cudaMemcpyDeviceToHost);
+  def printData() = {
+    //int [] T = new int[5];
+    var T = new Array[Float](nr*nc)
+    //JCuda.cudaMemcpy(Pointer.to(T), P, 5*Sizeof.INT, cudaMemcpyHostToHost);
+    cudaMemcpy(Pointer.to(T), data, Sizeof.FLOAT*nr*nc, cudaMemcpyKind.cudaMemcpyDeviceToHost);
+    // Print the results:
+    for (x <- T) {
+      print(x + " ")
+    }
+  }
+
+  // DERRICK
+  // Assume already in complex form
+  def zeroPad(left : Int, right : Int, top : Int, bot : Int) : GMat = {
+    var newR = nr + 2*top + 2*bot
+    var newC = nc + left + right
+    // TODO: new hashing for newOrCheckGMat which involves left right up down
+    if (newR == 0 && newC == 0) {
+      this
+    } else {
+      var output = GMat.newOrCheckGMat(newR, newC, null, GUID, "zeroPad".##)
+      output.clear
+      CUMAT.zeroPad(data, output.data , nr * nc/2, nr/2, nc, left, right, top, bot)
+      output
+    }
+  }
+
+  // DERRICK
+  /**
+   * Assumes output matrix is already a Complex Matrix for both inverse and non-inverse
+   */   
+  def __fft2(output : GMat, is_inverse : Boolean) = {
+    var t0 = System.nanoTime()
+    var plan : cufftHandle = new cufftHandle()
+    if (is_inverse) {
+      JCufft.cufftPlan2d(plan, nc, nr/2, cufftType.CUFFT_C2C)
+      // C2R conversion of the output data?
+      JCufft.cufftExecC2C(plan, data, output.data, JCufft.CUFFT_INVERSE)
+    } else {
+      JCufft.cufftPlan2d(plan, nc, nr/2, cufftType.CUFFT_C2C)
+      // R2C conversion of data here
+      //CUMAT.R2C(data, input.data, nrows * ncols)
+      JCufft.cufftExecC2C(plan, data, output.data, JCufft.CUFFT_FORWARD)
+    }
+    JCufft.cufftDestroy(plan)
+    var t1 = System.nanoTime()
+    Mat.nflops += (5L * length * (math.log(length) / math.log(2)).toLong)
+    //println(((t1 - t0)/scala.math.pow(10,9)).toFloat + " seconds")
+  }
+
+  // DERRICK
+  def conv(b : GMat) : GMat = {
+    var res = this.fft() cmult b.fft()
+    return res.fft(true)
+  }
+
+  // DERRICK
+  // Assumes matrix taken in already had R2C() applied to it
+  def conv2(b : GMat) : GMat = {
+    var newRows = this.nrows/2 + b.nrows/2 - 1
+    var newCols = this.ncols + b.ncols - 1
+    var res = this.zeroPad(0,math.max(0,newCols - this.ncols),0,math.max(0,newRows - this.nrows/2)).fft2() cmult b.zeroPad(0,math.max(0,newCols - b.ncols),0,math.max(0,newRows - b.nrows/2)).fft2()
+    res.fft2(true) //cdiv GMat(newRows*newCols)
+  }
+
+  // DERRICK: complex addition, subtraction, multiplication, and division
+  // TEST
+  def cadd  (a : GMat) = gCop(a, null, op_add)
+  def csub  (a : GMat) = gCop(a, null, op_sub)
+  def cmult (a : GMat) = gCop(a, null, op_mul)
+  def cdiv (a: GMat) = gCop(a, null, op_div)
+
   def dot (a:GMat, oldmat:Mat):GMat = 
   	if (nrows != a.nrows || ncols != a.ncols) {
   		throw new RuntimeException("dot dims not compatible")
@@ -376,7 +559,7 @@ class GMat(nr:Int, nc:Int, var data:Pointer, val realsize:Int) extends Mat(nr, n
   def ^  (a : GMat) = gOp(a, null, op_pow)
   def ∙  (a : GMat) = dot(a)
   def ∙→ (a : GMat) = dotr(a)
-  
+
   def > (b : GMat) = gOp(b, null, op_gt)
   def < (b : GMat) = gOp(b, null, op_lt)
   def == (b : GMat) = gOp(b, null, op_eq)
@@ -588,7 +771,7 @@ class GPair(val omat:Mat, val mat:GMat) extends Pair{
 	def dotr (b :GMat) = mat.dotr(b, omat) 
 	def ∙ (b :GMat) = mat.dot(b, omat)
 	def ∙→ (b :GMat) = mat.dotr(b, omat)
-	
+
 	override def == (b : Float) = mat.gOp(GMat(b), omat, op_eq)
   override def != (b : Float) = mat.gOp(GMat(b), omat, op_ne)
   override def * (b : Float) = mat.gOp(GMat(b), omat, op_mul)
@@ -724,6 +907,10 @@ class GPair(val omat:Mat, val mat:GMat) extends Pair{
 
 object GMat {
   
+  object UnOp {
+    val op_logit=0;
+  }
+
   object BinOp {
   	val op_add=0
   	val op_sub=1
@@ -849,6 +1036,14 @@ object GMat {
   
   def toFMat(a:GMat):FMat = a.toFMat(null)  
   
+  // DERRICK
+  // TEST: Assume GMat is already complex form
+  def toCMat(a:GMat):CMat = {
+    val out = CMat.newOrCheckCMat(a.nrows/2, a.ncols, null, a.GUID, "cmatFromGMat".##)
+    cudaMemcpy(Pointer.to(out.data), a.data, Sizeof.FLOAT*a.nrows*a.ncols, cudaMemcpyKind.cudaMemcpyDeviceToHost);
+    out
+  }
+
   def fromFMat(a:FMat, b:GMat):GMat = {
     val bb = GMat.newOrCheckGMat(a.nrows, a.ncols, b, a.GUID, SciFunctions.getGPU, "GMat_fromFMat".##)
     var err = JCublas.cublasSetVector(a.length, Sizeof.FLOAT, Pointer.to(a.data), 1, bb.data, 1)
